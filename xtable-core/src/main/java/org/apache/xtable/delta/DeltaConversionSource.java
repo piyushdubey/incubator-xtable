@@ -20,17 +20,14 @@ package org.apache.xtable.delta;
 
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import lombok.Builder;
 import lombok.extern.log4j.Log4j2;
 
+import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.SparkSession;
 
 import org.apache.spark.sql.delta.DeltaHistoryManager;
@@ -230,72 +227,41 @@ public class DeltaConversionSource implements ConversionSource<Long> {
   }
 
   private List<PartitionFileGroup> getInternalDataFiles(Snapshot snapshot, InternalSchema schema) {
-    try (DataFileIterator fileIterator = dataFileExtractor.iterator(snapshot, schema)) {
-      List<InternalDataFile> dataFiles = new ArrayList<>();
-      // fileIterator.forEachRemaining(dataFiles::add);
 
-      Map<String, InternalDataFile> addedFiles = new HashMap<>();
-      Map<String, InternalDataFile> removedFiles = new HashMap<>();
-      Map<String, InternalDeletionVector> deletionVectors = new HashMap<>();
+    try {
+      Map<String, InternalDataFile> dataFiles = new HashMap<>();
+      Dataset<AddFile> addFiles = snapshot.allFiles();
 
       FileFormat fileFormat =
           actionsConverter.convertToFileFormat(snapshot.metadata().format().provider());
-      List<Action> actionsForCurrentSnapshotVersion =
-          getChangesState().getActionsForVersion(snapshot.version());
       InternalTable tableAtCurrentSnapshotVersion =
           tableExtractor.table(deltaLog, tableName, snapshot.version());
 
-      for (Action action : actionsForCurrentSnapshotVersion) {
-        if (action instanceof AddFile) {
-          InternalDataFile dataFile =
-              actionsConverter.convertAddActionToInternalDataFile(
-                  (AddFile) action,
-                  snapshot,
-                  fileFormat,
-                  tableAtCurrentSnapshotVersion.getPartitioningFields(),
-                  tableAtCurrentSnapshotVersion.getReadSchema().getFields(),
-                  true,
-                  DeltaPartitionExtractor.getInstance(),
-                  DeltaStatsExtractor.getInstance());
+      for (AddFile addFile : addFiles.collectAsList()) {
+        InternalDataFile dataFile =
+            actionsConverter.convertAddActionToInternalDataFile(
+                addFile,
+                snapshot,
+                fileFormat,
+                tableAtCurrentSnapshotVersion.getPartitioningFields(),
+                tableAtCurrentSnapshotVersion.getReadSchema().getFields(),
+                true,
+                DeltaPartitionExtractor.getInstance(),
+                DeltaStatsExtractor.getInstance());
 
-          addedFiles.put(dataFile.getPhysicalPath(), dataFile);
-          InternalDeletionVector deletionVector =
-              actionsConverter.extractDeletionVector(snapshot, (AddFile) action);
+        dataFiles.put(dataFile.getPhysicalPath(), dataFile);
 
-          if (deletionVector != null) {
-            deletionVectors.put(deletionVector.dataFilePath(), deletionVector);
-          }
-        } else if (action instanceof RemoveFile) {
-          InternalDataFile dataFile =
-              actionsConverter.convertRemoveActionToInternalDataFile(
-                  (RemoveFile) action,
-                  snapshot,
-                  fileFormat,
-                  tableAtCurrentSnapshotVersion.getPartitioningFields(),
-                  DeltaPartitionExtractor.getInstance());
-          removedFiles.put(dataFile.getPhysicalPath(), dataFile);
+        InternalDeletionVector deletionVector =
+            actionsConverter.extractDeletionVector(snapshot, addFile);
+
+        if (deletionVector != null) {
+          dataFiles.put(deletionVector.getPhysicalPath(), deletionVector);
         }
       }
 
-      for (String deletionVector : deletionVectors.keySet()) {
-        if (removedFiles.containsKey(deletionVector)) {
-          addedFiles.remove(deletionVector);
-          removedFiles.remove(deletionVector);
-        } else {
-          log.warn(
-              "No Remove action found for the data file for which deletion vector is added {}. This is unexpected.",
-              deletionVector);
-        }
-      }
-
-      // Including all the files added till snapshot.
-      // Need handling for files removed as well - (discuss w Ashvin)
-
-      List<InternalDataFile> allFilesAddedInSnapshot =
-          Stream.concat(addedFiles.values().stream(), deletionVectors.values().stream())
-              .collect(Collectors.toList());
-
-      return PartitionFileGroup.fromFiles(allFilesAddedInSnapshot);
+      // The list of files in the current snapshot. This may include deletion vectors
+      List<InternalDataFile> snapshotDataFilesList = new ArrayList<>(dataFiles.values());
+      return PartitionFileGroup.fromFiles(snapshotDataFilesList);
     } catch (Exception e) {
       throw new ReadException("Failed to iterate through Delta data files", e);
     }
