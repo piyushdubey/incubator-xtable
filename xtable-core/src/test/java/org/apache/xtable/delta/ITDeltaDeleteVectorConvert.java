@@ -22,7 +22,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -323,7 +322,8 @@ public class ITDeltaDeleteVectorConvert {
     if (filePath.startsWith(tableBasePath)) {
       return filePath;
     }
-    return Paths.get(tableBasePath, file.path()).toString();
+    tableBasePath = tableBasePath.replaceAll("/$", "");
+    return String.join("/", tableBasePath, file.path());
   }
 
   private void validateDeletedRecordCount(
