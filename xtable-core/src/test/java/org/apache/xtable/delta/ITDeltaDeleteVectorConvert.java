@@ -199,6 +199,17 @@ public class ITDeltaDeleteVectorConvert {
     //    validateDeltaPartitioning(internalSnapshot);
     List<String> activeDataFilePaths =
         new ArrayList<>(testTableStates.get(testTableStates.size() - 1).activeFiles.keySet());
+
+    // Get List of Deletion Vector Files
+    List<String> deletionVectorPathsFromActiveFiles = new ArrayList<>();
+    for (AddFile addFile : testTableStates.get(testTableStates.size() - 1).activeFiles.values()) {
+      DeletionVectorDescriptor deletionVectorDescriptor = addFile.deletionVector();
+      if (deletionVectorDescriptor != null) {
+        deletionVectorPathsFromActiveFiles.add(deletionVectorDescriptor.absolutePath(testSparkDeltaTable.getDeltaLog().dataPath()).toString());
+      }
+    }
+    activeDataFilePaths.addAll(deletionVectorPathsFromActiveFiles);
+
     ValidationTestHelper.validateSnapshot(internalSnapshot, activeDataFilePaths);
 
     // Get changes in incremental format.

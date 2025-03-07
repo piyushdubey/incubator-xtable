@@ -54,7 +54,6 @@ import org.apache.xtable.model.storage.InternalDeletionVector;
 import org.apache.xtable.model.storage.InternalFilesDiff;
 import org.apache.xtable.model.storage.PartitionFileGroup;
 import org.apache.xtable.spi.extractor.ConversionSource;
-import org.apache.xtable.spi.extractor.DataFileIterator;
 
 @Log4j2
 @Builder
