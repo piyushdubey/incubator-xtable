@@ -20,6 +20,9 @@ package org.apache.xtable;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -41,7 +44,14 @@ public class ValidationTestHelper {
     List<String> filePaths =
         internalSnapshot.getPartitionedDataFiles().stream()
             .flatMap(group -> group.getDataFiles().stream())
-            .map(InternalDataFile::getPhysicalPath)
+            .map(
+                path -> {
+                  try {
+                    return Paths.get(new URI(path.getPhysicalPath())).toString();
+                  } catch (URISyntaxException e) {
+                    throw new RuntimeException(e);
+                  }
+                })
             .collect(Collectors.toList());
     replaceFileScheme(allActivePaths);
     replaceFileScheme(filePaths);

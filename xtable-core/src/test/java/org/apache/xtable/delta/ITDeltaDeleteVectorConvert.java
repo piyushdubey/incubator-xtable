@@ -21,7 +21,10 @@ package org.apache.xtable.delta;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -197,15 +200,28 @@ public class ITDeltaDeleteVectorConvert {
     InternalSnapshot internalSnapshot = conversionSource.getCurrentSnapshot();
 
     //    validateDeltaPartitioning(internalSnapshot);
-    List<String> activeDataFilePaths =
-        new ArrayList<>(testTableStates.get(testTableStates.size() - 1).activeFiles.keySet());
-
+    List<String> activeDataFilePaths = new ArrayList<>();
     // Get List of Deletion Vector Files
     List<String> deletionVectorPathsFromActiveFiles = new ArrayList<>();
-    for (AddFile addFile : testTableStates.get(testTableStates.size() - 1).activeFiles.values()) {
-      DeletionVectorDescriptor deletionVectorDescriptor = addFile.deletionVector();
+    for (Map.Entry<String, AddFile> addFileEntrySet :
+        testTableStates.get(testTableStates.size() - 1).activeFiles.entrySet()) {
+      // URI dataUri = new URI(addFileEntrySet.getKey());
+      activeDataFilePaths.add(Paths.get(addFileEntrySet.getKey()).toString());
+
+      DeletionVectorDescriptor deletionVectorDescriptor =
+          addFileEntrySet.getValue().deletionVector();
       if (deletionVectorDescriptor != null) {
-        deletionVectorPathsFromActiveFiles.add(deletionVectorDescriptor.absolutePath(testSparkDeltaTable.getDeltaLog().dataPath()).toString());
+        try {
+          deletionVectorPathsFromActiveFiles.add(
+              Paths.get(
+                      new URI(
+                          String.valueOf(
+                              deletionVectorDescriptor.absolutePath(
+                                  testSparkDeltaTable.getDeltaLog().dataPath()))))
+                  .toString());
+        } catch (URISyntaxException e) {
+          throw new RuntimeException(e);
+        }
       }
     }
     activeDataFilePaths.addAll(deletionVectorPathsFromActiveFiles);
@@ -333,8 +349,14 @@ public class ITDeltaDeleteVectorConvert {
     if (filePath.startsWith(tableBasePath)) {
       return filePath;
     }
-    tableBasePath = tableBasePath.replaceAll("/$", "");
-    return String.join("/", tableBasePath, file.path());
+
+    String path = filePath;
+    try {
+      path = Paths.get(new URI(tableBasePath.toString())).resolve(file.path()).toString();
+    } catch (URISyntaxException e) {
+      throw new RuntimeException(e);
+    }
+    return path;
   }
 
   private void validateDeletedRecordCount(
