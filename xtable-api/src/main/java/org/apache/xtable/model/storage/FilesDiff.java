@@ -50,7 +50,7 @@ public class FilesDiff<L, P> {
 
   /**
    * Compares the latest files with the previous files and identifies the files that are new, i.e.
-   * are present in latest files buy not present in the previously known files, and the files that
+   * are present in latest files but not present in the previously known files, and the files that
    * are removed, i.e. present in the previously known files but not present in the latest files.
    *
    * @param latestFiles a map of file path and file object representing files in the latest snapshot
@@ -83,7 +83,7 @@ public class FilesDiff<L, P> {
   /**
    * This method wraps the {@link #findNewAndRemovedFiles(Map, Map)} method, to compare the latest
    * file groups with the previous files and identifies the files that are new, i.e. are present in
-   * latest files buy not present in the previously known files, and the files that are removed,
+   * latest files but not present in the previously known files, and the files that are removed,
    * i.e. present in the previously known files but not present in the latest files.
    *
    * @param latestFileGroups a list of file groups representing the latest snapshot of a table

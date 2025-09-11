@@ -34,6 +34,7 @@ import org.apache.xtable.model.stat.PartitionValue;
 public class PartitionFileGroup {
   List<PartitionValue> partitionValues;
   List<? extends InternalFile> files;
+  List<InternalDeletionVector> deletionVectors;
 
   public static List<PartitionFileGroup> fromFiles(List<InternalDataFile> files) {
     return fromFiles(files.stream());
@@ -57,6 +58,29 @@ public class PartitionFileGroup {
     return files.stream()
         .filter(InternalDataFile.class::isInstance)
         .map(file -> (InternalDataFile) file)
+        .collect(Collectors.toList());
+  }
+
+  public static List<PartitionFileGroup> fromAllFiles(
+      Stream<InternalDataFile> files, Map<String, InternalDeletionVector> deletionVectors) {
+    Map<List<PartitionValue>, List<InternalDataFile>> filesGrouped =
+        files.collect(Collectors.groupingBy(InternalDataFile::getPartitionValues));
+
+    return filesGrouped.entrySet().stream()
+        .map(
+            entry ->
+                PartitionFileGroup.builder()
+                    .partitionValues(entry.getKey())
+                    .files(entry.getValue())
+                    .deletionVectors(fromDeletionVectors(entry.getValue(), deletionVectors))
+                    .build())
+        .collect(Collectors.toList());
+  }
+
+  public static List<InternalDeletionVector> fromDeletionVectors(
+      List<InternalDataFile> dataFiles, Map<String, InternalDeletionVector> deletionVectors) {
+    return dataFiles.stream()
+        .map(file -> deletionVectors.get(file.getPhysicalPath()))
         .collect(Collectors.toList());
   }
 }

@@ -18,18 +18,25 @@
  
 package org.apache.xtable.delta;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 
 import org.apache.spark.sql.delta.Snapshot;
 import org.apache.spark.sql.delta.actions.AddFile;
 import org.apache.spark.sql.delta.actions.DeletionVectorDescriptor;
 import org.apache.spark.sql.delta.actions.RemoveFile;
+import org.apache.spark.sql.delta.deletionvectors.RoaringBitmapArray;
+import org.apache.spark.sql.delta.storage.dv.DeletionVectorStore;
+import org.apache.spark.sql.delta.storage.dv.HadoopFileSystemDVStore;
+
+import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.xtable.exception.NotSupportedException;
 import org.apache.xtable.model.schema.InternalField;
@@ -38,6 +45,7 @@ import org.apache.xtable.model.stat.ColumnStat;
 import org.apache.xtable.model.stat.FileStats;
 import org.apache.xtable.model.storage.FileFormat;
 import org.apache.xtable.model.storage.InternalDataFile;
+import org.apache.xtable.model.storage.InternalDeletionVector;
 
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class DeltaActionsConverter {
@@ -108,21 +116,69 @@ public class DeltaActionsConverter {
 
   /**
    * Extracts the representation of the deletion vector information corresponding to an AddFile
-   * action. Currently, this method extracts and returns the path to the data file for which a
-   * deletion vector data is present.
+   * action.
    *
    * @param snapshot the commit snapshot
    * @param addFile the add file action
-   * @return the deletion vector representation (path of data file), or null if no deletion vector
-   *     is present
+   * @return the deletion vector representation, or null if no deletion vector is present
    */
-  public String extractDeletionVectorFile(Snapshot snapshot, AddFile addFile) {
+  public InternalDeletionVector extractDeletionVector(Snapshot snapshot, AddFile addFile) {
     DeletionVectorDescriptor deletionVector = addFile.deletionVector();
     if (deletionVector == null) {
       return null;
     }
 
     String dataFilePath = addFile.path();
-    return getFullPathToFile(snapshot, dataFilePath);
+    dataFilePath = getFullPathToFile(snapshot, dataFilePath);
+
+    long[] ordinals = getOrdinals(snapshot, deletionVector);
+
+    InternalDeletionVector.InternalDeletionVectorBuilder<?, ?> deletionVectorBuilder =
+        InternalDeletionVector.builder()
+            .recordCount(deletionVector.cardinality())
+            .dataFilePath(dataFilePath)
+            .ordinalsSupplier(() -> Arrays.stream(ordinals).iterator());
+
+    if (deletionVector.isInline()) {
+      deletionVectorBuilder.binaryRepresentation(deletionVector.inlineData()).physicalPath("");
+    } else {
+      Path deletionVectorFilePath = deletionVector.absolutePath(snapshot.deltaLog().dataPath());
+      deletionVectorBuilder
+          .offset(getOffset(deletionVector))
+          .physicalPath(deletionVectorFilePath.toString());
+    }
+
+    return deletionVectorBuilder.build();
+  }
+
+  private long[] getOrdinals(Snapshot snapshot, DeletionVectorDescriptor deletionVectorDescriptor) {
+    if (deletionVectorDescriptor.isInline()) {
+      return RoaringBitmapArray.readFrom(deletionVectorDescriptor.inlineData()).values();
+    }
+
+    Path deletionVectorFilePath =
+        deletionVectorDescriptor.absolutePath(snapshot.deltaLog().dataPath());
+    int offset = getOffset(deletionVectorDescriptor);
+
+    long[] rbmValues =
+        parseOrdinalFile(
+            snapshot.deltaLog().newDeltaHadoopConf(),
+            deletionVectorFilePath,
+            deletionVectorDescriptor.sizeInBytes(),
+            offset);
+    return rbmValues;
+  }
+
+  private static int getOffset(DeletionVectorDescriptor deletionVectorDescriptor) {
+    return deletionVectorDescriptor.offset().isDefined()
+        ? (int) deletionVectorDescriptor.offset().get()
+        : 1;
+  }
+
+  @VisibleForTesting
+  long[] parseOrdinalFile(Configuration conf, Path filePath, int size, int offset) {
+    DeletionVectorStore dvStore = new HadoopFileSystemDVStore(conf);
+    RoaringBitmapArray rbm = dvStore.read(filePath, offset, size);
+    return rbm.values();
   }
 }
